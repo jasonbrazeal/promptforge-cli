@@ -1,0 +1,8 @@
+# The engine's tool picker pulls in candle -> gemm-f16, whose inline asm uses
+# half-precision instructions that the default aarch64-unknown-linux-gnu
+# target does not enable ("instruction requires: fullfp16"). Debug builds
+# only: release builds inline the asm behind gemm's runtime fp16 detection.
+# Rust's `fp16` target feature is LLVM's `fullfp16`.
+# Upstream: https://github.com/sarah-quinones/gemm/issues/31
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+fp16"]

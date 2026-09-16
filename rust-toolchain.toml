@@ -1,0 +1,3 @@
+# Same as upstream promptforge: build on current stable.
+[toolchain]
+channel = "stable"
