@@ -1,7 +1,14 @@
-//! `promptforge run <file.md> [--args TEXT | --args-file PATH]`: run one
-//! PromptForge prompt against a gateway. The run's input - what the prompt
-//! sees as `args` - comes from `--args`, from the contents of `--args-file`,
-//! or is empty. No bare positional input is accepted.
+//! `promptforge run <file.md> [--args TEXT | --args-file PATH] [--input
+//! NAME=PATH]... [--output NAME=PATH]...`: run one PromptForge prompt against
+//! a gateway. The run's input - what the prompt sees as `args` - comes from
+//! `--args`, from the contents of `--args-file`, or is empty. No bare
+//! positional input is accepted.
+//!
+//! `--input` seeds the run's store with a file before the run, under the
+//! name the prompt reads with `store.read` (its `input:` declaration);
+//! `--output` copies a store file the prompt wrote with `store.write` (its
+//! `output:` declaration) to disk after a successful run. The prompt never
+//! learns a host path: the store is the only door.
 //!
 //! Configuration is environment only:
 //! - `PROMPTFORGE_GATEWAY_URL`: the gateway's OpenAI-shaped API root, for
@@ -27,11 +34,13 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use promptforge_api::client::{GatewayClient, fetch_model_catalog};
 use promptforge_api::{
-    CapabilityRegistry, Environment, Prompt, RunContext, RunResult, Web, promptforge_version,
+    CapabilityRegistry, Environment, Prompt, RequirementCheck, Requirements, RunContext, RunResult,
+    Web, promptforge_version,
 };
 use shared_promptforge_api::cancel::CancelHandle;
 use shared_promptforge_api::models::{ModelCatalog, ModelDescriptor, ModelId};
 use shared_promptforge_api::observe::{NullObserver, Observer};
+use shared_vfs::{Origin, VfsError, VfsRef};
 
 use crate::terminal::{StderrObserver, StdinBroker};
 
@@ -39,6 +48,14 @@ use crate::terminal::{StderrObserver, StdinBroker};
 const EXIT_CANCELLED: u8 = 130;
 /// The exit status of every other failure.
 const EXIT_FAILURE: u8 = 1;
+
+/// The mount prefix of the run-scoped store inside the run's VFS: the
+/// prompt's `store.read("paper.md")` resolves to `<mount>/paper.md`. The
+/// engine defines this as `promptforge_vfs::STORE_MOUNT`, in a crate the
+/// one-door rule keeps internal, and does not re-export it through
+/// `promptforge-api`; this mirrors it. If the engine moves the mount, the
+/// seed probe in [`seed_store`] fails loudly rather than writing beside it.
+const STORE_MOUNT: &str = "/_promptforge/store";
 
 /// The `promptforge` command-line interface.
 #[derive(Debug, Parser)]
@@ -72,10 +89,60 @@ struct RunArgs {
     /// `args` verbatim.
     #[arg(long, value_name = "PATH")]
     args_file: Option<PathBuf>,
+    /// Seed the run's store with the file at PATH under the store name NAME
+    /// before the run, so the prompt can `store.read(NAME)`. Repeatable.
+    #[arg(long, value_name = "NAME=PATH", value_parser = FileMapping::parse)]
+    input: Vec<FileMapping>,
+    /// After a successful run, copy the store file NAME the prompt wrote with
+    /// `store.write(NAME)` to PATH on disk. Repeatable.
+    #[arg(long, value_name = "NAME=PATH", value_parser = FileMapping::parse)]
+    output: Vec<FileMapping>,
     /// Print the configuration in use and run lifecycle observations to
     /// stderr.
     #[arg(short, long)]
     verbose: bool,
+}
+
+/// One `NAME=PATH` pair from `--input` or `--output`: a store-internal name
+/// the prompt addresses and a host path the CLI reads or writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileMapping {
+    /// The store path as the prompt names it, e.g. `paper.md`.
+    name: String,
+    /// The host file the store entry is read from or written to.
+    path: PathBuf,
+}
+
+impl FileMapping {
+    /// Parses `NAME=PATH`. The name is a relative store path: non-empty, no
+    /// leading `/`, no `..` segments, no backslashes - the same shape the
+    /// prompt's `store` table accepts, checked here so a bad mapping fails
+    /// at argument parsing rather than inside the run.
+    fn parse(text: &str) -> Result<FileMapping, String> {
+        let Some((name, path)) = text.split_once('=') else {
+            return Err(format!("expected NAME=PATH, got {text:?}"));
+        };
+        if name.is_empty() {
+            return Err(format!("the store name is empty in {text:?}"));
+        }
+        if name.starts_with('/') || name.contains('\\') || name.split('/').any(|s| s == "..") {
+            return Err(format!(
+                "the store name {name:?} must be a relative path without `..` or backslashes"
+            ));
+        }
+        if path.is_empty() {
+            return Err(format!("the host path is empty in {text:?}"));
+        }
+        Ok(FileMapping {
+            name: name.to_owned(),
+            path: PathBuf::from(path),
+        })
+    }
+
+    /// The name's absolute location inside the run's VFS.
+    fn store_path(&self) -> String {
+        format!("{STORE_MOUNT}/{}", self.name)
+    }
 }
 
 /// Where the run's `args` string comes from.
@@ -212,6 +279,21 @@ async fn run(args: RunArgs, cancel: CancelHandle) -> Result<RunResult> {
             .with_context(|| format!("read args file {}", path.display()))?,
         InputSource::Empty => String::new(),
     };
+    // Read every seed file before any network call: a missing paper fails
+    // fast, not after the catalog fetch.
+    let mut seeds = Vec::with_capacity(args.input.len());
+    for mapping in &args.input {
+        let contents = tokio::fs::read_to_string(&mapping.path)
+            .await
+            .with_context(|| {
+                format!(
+                    "read --input {} from {}",
+                    mapping.name,
+                    mapping.path.display()
+                )
+            })?;
+        seeds.push((mapping, contents));
+    }
 
     let observer: Arc<dyn Observer> = if args.verbose {
         Arc::new(StderrObserver)
@@ -231,6 +313,17 @@ async fn run(args: RunArgs, cancel: CancelHandle) -> Result<RunResult> {
                 eprintln!("args:    {} bytes from {}", input.len(), path.display());
             }
             InputSource::Text(_) | InputSource::Empty => eprintln!("args:    {input:?}"),
+        }
+        for (mapping, contents) in &seeds {
+            eprintln!(
+                "input:   {} <- {} ({} bytes)",
+                mapping.name,
+                mapping.path.display(),
+                contents.len()
+            );
+        }
+        for mapping in &args.output {
+            eprintln!("output:  {} -> {}", mapping.name, mapping.path.display());
         }
         eprintln!("run id:  {run_id}");
     }
@@ -260,7 +353,124 @@ async fn run(args: RunArgs, cancel: CancelHandle) -> Result<RunResult> {
         .cancel(cancel)
         .input_broker(Arc::new(StdinBroker))
         .model(model);
-    Ok(environment.run(&prompt, &input, ctx).await)
+
+    // Prepare, seed, run, extract: `Environment::run` would prepare and run
+    // in one step, but the store the prompt sees exists only after prepare,
+    // so seeding needs the two halves apart. The refusal for an
+    // unsatisfiable prompt is reproduced here because `Environment::run`
+    // owns it on the one-step path.
+    let (ctx, requirements) = environment.prepare(&prompt, ctx);
+    if !requirements.is_satisfied() {
+        bail!("{}", render_requirements(&requirements));
+    }
+    let vfs = ctx.vfs_handle().clone();
+    seed_store(&vfs, &seeds)?;
+    let result = promptforge_api::run(&prompt, &input, ctx).await;
+    if matches!(result, RunResult::Ok(_)) {
+        extract_store(&vfs, &args.output).await?;
+    }
+    Ok(result)
+}
+
+/// Writes every `--input` file into the run's store under its store name.
+/// The seeding capability drops at return, releasing its claims, so the
+/// run's own identity never meets the host's.
+fn seed_store(vfs: &VfsRef, seeds: &[(&FileMapping, String)]) -> Result<()> {
+    if seeds.is_empty() {
+        return Ok(());
+    }
+    let access = vfs
+        .acquire(Origin::new("promptforge-cli --input"))
+        .context("acquire the run's store for seeding")?;
+    // The mount must exist before anything is written under it: a stat of
+    // the mount root answers for a mounted store and is `NotFound` for an
+    // unmounted path, which would mean the engine moved the mount.
+    access.stat(STORE_MOUNT).with_context(|| {
+        format!("the run's store is not mounted at {STORE_MOUNT}; the engine's store mount moved")
+    })?;
+    for (mapping, contents) in seeds {
+        access
+            .write(&mapping.store_path(), contents.as_bytes())
+            .with_context(|| format!("seed the store file {} for --input", mapping.name))?;
+    }
+    Ok(())
+}
+
+/// Copies every `--output` store file the run left behind to its host
+/// path. A store file the prompt never wrote is an error naming the
+/// promise, not a bare not-found.
+async fn extract_store(vfs: &VfsRef, outputs: &[FileMapping]) -> Result<()> {
+    if outputs.is_empty() {
+        return Ok(());
+    }
+    let access = vfs
+        .acquire(Origin::new("promptforge-cli --output"))
+        .context("acquire the run's store for extraction")?;
+    for mapping in outputs {
+        let contents = match access.read(&mapping.store_path()) {
+            Ok(contents) => contents,
+            Err(VfsError::NotFound(_)) => bail!(
+                "--output {}: the run left no store file named {:?}; \
+                 the prompt must `store.write({:?}, ...)` before it returns",
+                mapping.name,
+                mapping.name,
+                mapping.name
+            ),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("read the store file {} for --output", mapping.name));
+            }
+        };
+        tokio::fs::write(&mapping.path, &contents)
+            .await
+            .with_context(|| {
+                format!(
+                    "write --output {} to {}",
+                    mapping.name,
+                    mapping.path.display()
+                )
+            })?;
+    }
+    Ok(())
+}
+
+/// Renders an unsatisfied preflight report, one line per gap with required
+/// versus actual, in the shape the engine's own refusal notice uses.
+fn render_requirements(requirements: &Requirements) -> String {
+    use std::fmt::Write as _;
+
+    let mut notice = String::from("the environment cannot satisfy this prompt:");
+    for id in &requirements.missing_required {
+        // Writing into a String cannot fail; the Result is a trait artifact.
+        let _ = write!(notice, "\n- missing required capability: {id}");
+    }
+    for conflict in &requirements.conflicts {
+        let _ = write!(
+            notice,
+            "\n- conflicting capabilities: {} and {} cannot be activated together; \
+             declare one or the other",
+            conflict.first, conflict.second
+        );
+    }
+    for unmet in &requirements.unmet_requirements {
+        let line = match unmet.check {
+            RequirementCheck::ContextMinimum => format!(
+                "role '{}': requires a context of at least {} tokens; \
+                 the current model provides {}",
+                unmet.role, unmet.required, unmet.actual
+            ),
+            RequirementCheck::HardKeyword => format!(
+                "role '{}': requires '{}'; the current model's thinking capability is {}",
+                unmet.role, unmet.required, unmet.actual
+            ),
+            _ => format!(
+                "role '{}': requires {}; the current model provides {}",
+                unmet.role, unmet.required, unmet.actual
+            ),
+        };
+        let _ = write!(notice, "\n- {line}");
+    }
+    notice
 }
 
 /// Trips `cancel` on the first Ctrl-C.
@@ -365,6 +575,114 @@ mod tests {
             parse(&["promptforge", "run", "p.md", "--args-file", "in.txt", "-v"]).expect("parses");
         assert_eq!(args.input_source(), InputSource::File(Path::new("in.txt")));
         assert!(args.verbose);
+    }
+
+    #[test]
+    fn input_and_output_mappings_parse_and_repeat() {
+        let args = parse(&[
+            "promptforge",
+            "run",
+            "p.md",
+            "--input",
+            "paper.md=/data/p2300r10.md",
+            "--input",
+            "meta.json=/data/meta.json",
+            "--output",
+            "report.json=/out/report.json",
+        ])
+        .expect("parses");
+        assert_eq!(
+            args.input,
+            vec![
+                FileMapping {
+                    name: "paper.md".to_owned(),
+                    path: PathBuf::from("/data/p2300r10.md"),
+                },
+                FileMapping {
+                    name: "meta.json".to_owned(),
+                    path: PathBuf::from("/data/meta.json"),
+                },
+            ]
+        );
+        assert_eq!(args.output.len(), 1);
+        assert_eq!(
+            args.output[0].store_path(),
+            "/_promptforge/store/report.json"
+        );
+        // A host path may itself contain `=`; only the first one splits.
+        let mapping = FileMapping::parse("a.md=/tmp/x=y.md").expect("parses");
+        assert_eq!(mapping.path, PathBuf::from("/tmp/x=y.md"));
+    }
+
+    #[test]
+    fn malformed_mappings_are_usage_errors() {
+        for bad in [
+            "paper.md",
+            "=/tmp/x",
+            "paper.md=",
+            "/abs.md=/tmp/x",
+            "../escape.md=/tmp/x",
+            "a/../b.md=/tmp/x",
+            "a\\b.md=/tmp/x",
+        ] {
+            assert!(FileMapping::parse(bad).is_err(), "{bad:?} must be rejected");
+            assert!(
+                parse(&["promptforge", "run", "p.md", "--input", bad]).is_err(),
+                "{bad:?} must be rejected by clap"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn seeding_and_extraction_round_trip_through_the_store_mount() {
+        let vfs = VfsRef::builder()
+            .mount(STORE_MOUNT, shared_vfs::MemoryBackend::new())
+            .build();
+        let input = FileMapping::parse("paper.md=/unused").expect("parses");
+        seed_store(&vfs, &[(&input, "# Title\n\nbody".to_owned())]).expect("seeds");
+
+        let access = vfs.acquire(Origin::new("test")).expect("acquires");
+        let seeded = access.read("/_promptforge/store/paper.md").expect("reads");
+        assert_eq!(seeded, b"# Title\n\nbody");
+        access
+            .write("/_promptforge/store/report.json", b"{\"ok\":true}")
+            .expect("writes");
+        drop(access);
+
+        let dir = std::env::temp_dir().join(format!("promptforge-cli-{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).expect("creates the temp dir");
+        let target = dir.join("report.json");
+        let output = FileMapping {
+            name: "report.json".to_owned(),
+            path: target.clone(),
+        };
+        extract_store(&vfs, std::slice::from_ref(&output))
+            .await
+            .expect("extracts");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("the output landed on disk"),
+            "{\"ok\":true}"
+        );
+
+        let missing = FileMapping {
+            name: "never-written.json".to_owned(),
+            path: dir.join("never.json"),
+        };
+        let error = extract_store(&vfs, std::slice::from_ref(&missing))
+            .await
+            .expect_err("a missing output is an error");
+        let text = error.to_string();
+        assert!(text.contains("never-written.json"), "{text}");
+        assert!(text.contains("store.write"), "{text}");
+        std::fs::remove_dir_all(&dir).expect("removes the temp dir");
+    }
+
+    #[test]
+    fn an_unsatisfied_report_renders_every_gap() {
+        let satisfied = Requirements::default();
+        assert!(satisfied.is_satisfied());
+        let text = render_requirements(&satisfied);
+        assert_eq!(text, "the environment cannot satisfy this prompt:");
     }
 
     #[test]

@@ -2628,6 +2628,7 @@ dependencies = [
  "fastrand",
  "promptforge-api",
  "shared-promptforge-api",
+ "shared-vfs",
  "tokio",
 ]
 
