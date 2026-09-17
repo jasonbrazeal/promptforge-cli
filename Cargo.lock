@@ -2593,12 +2593,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-api"
+name = "promptforge-api-runtime"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "async-trait",
  "mlua",
+ "promptforge-api-types",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
@@ -2610,12 +2611,28 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "shared-vfs",
  "thiserror 2.0.20",
  "time",
  "tokio",
  "tracing",
+ "workspace-hack",
+]
+
+[[package]]
+name = "promptforge-api-types"
+version = "0.3.0"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
+dependencies = [
+ "async-trait",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "shared-vfs",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2626,8 +2643,7 @@ dependencies = [
  "async-trait",
  "clap",
  "fastrand",
- "promptforge-api",
- "shared-promptforge-api",
+ "promptforge-api-runtime",
  "shared-vfs",
  "tokio",
 ]
@@ -2635,59 +2651,63 @@ dependencies = [
 [[package]]
 name = "promptforge-lua"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "mlua",
+ "promptforge-api-types",
  "promptforge-model-client",
  "promptforge-store",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.20",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-model-client"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
+ "promptforge-api-types",
  "promptforge-tool-picker",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.20",
  "tracing",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-parser"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
+ "promptforge-api-types",
  "promptforge-lua",
  "pulldown-cmark",
  "serde",
  "serde_yaml_ng",
- "shared-promptforge-api",
  "thiserror 2.0.20",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-store"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "promptforge-vfs",
  "shared-vfs",
  "thiserror 2.0.20",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-tool-picker"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -2695,66 +2715,71 @@ dependencies = [
  "candle-transformers",
  "half",
  "hf-hub",
+ "promptforge-api-types",
  "safetensors",
  "serde",
  "serde_json",
  "sha2",
  "shared-progress",
- "shared-promptforge-api",
  "thiserror 2.0.20",
  "tokenizers",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-vfs"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "shared-vfs",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-web"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
+ "promptforge-api-types",
  "promptforge-web-search",
  "promptforge-webfetch",
- "shared-promptforge-api",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-web-search"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "async-trait",
+ "promptforge-api-types",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.20",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "promptforge-webfetch"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "async-trait",
  "encoding_rs",
  "htmd",
  "ipnet",
  "mime",
+ "promptforge-api-types",
  "readabilityrs",
  "reqwest 0.12.28",
  "serde_json",
- "shared-promptforge-api",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3534,31 +3559,17 @@ dependencies = [
 [[package]]
 name = "shared-progress"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 dependencies = [
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "shared-promptforge-api"
-version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
-dependencies = [
- "async-trait",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "shared-vfs",
- "thiserror 2.0.20",
- "tokio",
- "tokio-util",
+ "workspace-hack",
 ]
 
 [[package]]
 name = "shared-vfs"
 version = "0.3.0"
-source = "git+https://github.com/cppalliance/promptforge?branch=master#09f29994c513b9b7104c0a66952d82dcccd364c8"
+source = "git+https://github.com/cppalliance/promptforge?branch=master#273ad0fba07951b76baf5e97cfb33fa401446bc9"
 
 [[package]]
 name = "shellexpand"
@@ -4785,6 +4796,10 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
 
 [[package]]
 name = "writeable"

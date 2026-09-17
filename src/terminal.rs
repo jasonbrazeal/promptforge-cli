@@ -3,8 +3,8 @@
 
 use std::io::IsTerminal;
 
-use promptforge_api::input::{InputBroker, InputError, InputOutcome};
-use shared_promptforge_api::observe::{Observation, Observer};
+use promptforge_api_runtime::input::{InputBroker, InputError, InputOutcome};
+use promptforge_api_runtime::types::observe::{Observation, Observer};
 use tokio::io::AsyncBufReadExt;
 
 /// Prints each lifecycle observation to stderr.

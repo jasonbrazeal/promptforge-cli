@@ -32,14 +32,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
-use promptforge_api::client::{GatewayClient, fetch_model_catalog};
-use promptforge_api::{
+use promptforge_api_runtime::client::{GatewayClient, fetch_model_catalog};
+use promptforge_api_runtime::types::cancel::CancelHandle;
+use promptforge_api_runtime::types::models::{ModelCatalog, ModelDescriptor, ModelId};
+use promptforge_api_runtime::types::observe::{NullObserver, Observer};
+use promptforge_api_runtime::{
     CapabilityRegistry, Environment, Prompt, RequirementCheck, Requirements, RunContext, RunResult,
     Web, promptforge_version,
 };
-use shared_promptforge_api::cancel::CancelHandle;
-use shared_promptforge_api::models::{ModelCatalog, ModelDescriptor, ModelId};
-use shared_promptforge_api::observe::{NullObserver, Observer};
 use shared_vfs::{Origin, VfsError, VfsRef};
 
 use crate::terminal::{StderrObserver, StdinBroker};
@@ -53,8 +53,9 @@ const EXIT_FAILURE: u8 = 1;
 /// prompt's `store.read("paper.md")` resolves to `<mount>/paper.md`. The
 /// engine defines this as `promptforge_vfs::STORE_MOUNT`, in a crate the
 /// one-door rule keeps internal, and does not re-export it through
-/// `promptforge-api`; this mirrors it. If the engine moves the mount, the
-/// seed probe in [`seed_store`] fails loudly rather than writing beside it.
+/// `promptforge-api-runtime`; this mirrors it. If the engine moves the
+/// mount, the seed probe in [`seed_store`] fails loudly rather than writing
+/// beside it.
 const STORE_MOUNT: &str = "/_promptforge/store";
 
 /// The `promptforge` command-line interface.
@@ -365,7 +366,7 @@ async fn run(args: RunArgs, cancel: CancelHandle) -> Result<RunResult> {
     }
     let vfs = ctx.vfs_handle().clone();
     seed_store(&vfs, &seeds)?;
-    let result = promptforge_api::run(&prompt, &input, ctx).await;
+    let result = promptforge_api_runtime::run(&prompt, &input, ctx).await;
     if matches!(result, RunResult::Ok(_)) {
         extract_store(&vfs, &args.output).await?;
     }
@@ -547,7 +548,7 @@ async fn main() -> ExitCode {
 mod tests {
     use std::num::NonZeroU32;
 
-    use shared_promptforge_api::models::ThinkingMode;
+    use promptforge_api_runtime::types::models::ThinkingMode;
 
     use super::*;
 

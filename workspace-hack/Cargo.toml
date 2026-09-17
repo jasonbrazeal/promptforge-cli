@@ -1,0 +1,14 @@
+# Empty stand-in for the engine workspace's cargo-hakari crate; see the
+# `[patch]` table in the root Cargo.toml. The name and version must match
+# what the engine's manifests request.
+[package]
+name = "workspace-hack"
+version = "0.1.0"
+edition = "2024"
+license = "BSL-1.0"
+description = "Empty stub replacing promptforge's workspace-hack crate"
+publish = false
+
+# Its own root: keeps Cargo from treating it as a stray member of the
+# consuming package.
+[workspace]

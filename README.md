@@ -134,7 +134,9 @@ stdout is `wrote output.txt: 12 bytes` (the prompt's return value), and `/tmp/ou
 
 ## Building
 
-`cargo build`. The engine crates come from the [promptforge](https://github.com/cppalliance/promptforge) git repo; `Cargo.lock` pins the revision and `cargo update -p promptforge-api` moves it forward.
+`cargo build`. The engine crates come from the [promptforge](https://github.com/cppalliance/promptforge) git repo; `Cargo.lock` pins the revision and `cargo update -p promptforge-api-runtime` moves it forward.
+
+The engine's crates depend on `workspace-hack`, its cargo-hakari feature-unification crate, which from outside that workspace would pull every product's dependencies (Tauri, GTK, candle, ...) into this build. The `[patch]` in `Cargo.toml` swaps it for the empty stub in `workspace-hack/`; nothing there needs maintenance unless upstream renames the crate or bumps its version.
 
 Before committing:
 
